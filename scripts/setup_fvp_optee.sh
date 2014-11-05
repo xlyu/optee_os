@@ -161,6 +161,18 @@ if [ ! -d "$DST_AARCH32_GCC" ]; then
 	tar xf ${AARCH32_GCC_VERSION}.tar.xz && mv $AARCH32_GCC_VERSION $DST_AARCH32_GCC
 fi
 
+
+#make sure have installed  uuid-dev
+#For Ubuntu 14.04 the following helps:
+sudo apt-get install uuid-dev
+# If the downloaded toolchain can't execute it could be that you're in a
+# 64-bit system without required 32-bit libs
+# For Ubuntu 14.04 the following helps:
+sudo apt-get install libc6:i386 libstdc++6:i386 libz1:i386
+###############################################################################
+#clean all at first if you want move project to other places                                                          #
+###############################################################################
+. $DEV_PATH/clean_fvp_test.sh
 ################################################################################
 # Generate the build script for Linux kernel                                   #
 ################################################################################
@@ -171,9 +183,7 @@ export PATH=$DST_AARCH64_NONE_GCC/bin:\$PATH
 export CROSS_COMPILE=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
 cd $DST_KERNEL
 
-if [ ! -f ".config" ]; then
-	make ARCH=arm64 defconfig
-fi
+make ARCH=arm64 defconfig
 
 make -j\`getconf _NPROCESSORS_ONLN\` LOCALVERSION= ARCH=arm64 \$@
 EOF
@@ -190,14 +200,10 @@ export KERNEL_VERSION=`cd $DST_KERNEL && make kernelversion`
 ################################################################################
 cd $DST_GEN_ROOTFS
 export CC_DIR=$DST_AARCH64_GCC
-
+export CROSS_COMPILE=$DEV_PATH/toolchains/aarch64/bin/aarch64-linux-gnu-
 # Set path to gen_init_cpio
 export PATH=$DST_KERNEL/usr:$PATH
-
-if [ ! -f "$DST_GEN_ROOTFS/filelist-tee.txt" ]; then
-	echo "Generting the file system"
-	./generate-cpio-rootfs.sh fvp-aarch64
-fi
+./generate-cpio-rootfs.sh fvp-aarch64
 
 cp $DST_GEN_ROOTFS/filelist-final.txt $DST_GEN_ROOTFS/filelist-tee.txt
 
@@ -275,7 +281,7 @@ git checkout --detach v1.2
 # Build the EDK host tools
 make -C BaseTools clean
 make -C BaseTools
-
+make -C BaseTools/Source/C
 cd $DEV_PATH
 cat > $DEV_PATH/build_uefi.sh << EOF
 #/bin/bash
@@ -305,7 +311,8 @@ export CFLAGS='-O0 -gdwarf-2'
 export DEBUG=1
 export BL32=$DST_OPTEE_OS/out-os-fvp/core/tee.bin
 export BL33=$DST_EDK2/Build/ArmVExpress-FVP-AArch64/RELEASE_GCC49/FV/FVP_AARCH64_EFI.fd
-
+cd $DST_ATF/tools/fip_create
+make
 cd $DST_ATF
 make -j\`getconf _NPROCESSORS_ONLN\`   \\
 	DEBUG=$DEBUG                   \\

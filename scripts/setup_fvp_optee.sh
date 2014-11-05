@@ -273,6 +273,7 @@ $DEV_PATH/build_optee_os.sh
 ################################################################################
 # First some configuration according to the ARM-Trusted-Firmware page:
 # https://github.com/ARM-software/arm-trusted-firmware/blob/master/docs/user-guide.md#obtaining-edk2
+#if you rebuild project in other place, you may comment the follow line 
 cd $DST_EDK2
 git remote add -f --tags arm-software https://github.com/ARM-software/edk2.git
 git checkout --detach v1.2

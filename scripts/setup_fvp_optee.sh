@@ -3,7 +3,7 @@
 #check and usage                                                               #
 ################################################################################
 usage(){
-  echo "USAGE:$0 PROJECT_BUILD_PATH [LINARO_USERNAME]"
+        echo "USAGE:$0 PROJECT_BUILD_PATH [LINARO_USERNAME]"
 	echo "Build FVP Environment to Run OPTEE and ATF"
 	echo ""
 	echo "Options usage:"

@@ -3,7 +3,7 @@
 #check and usage                                                               #
 ################################################################################
 usage(){
-        echo "USAGE:$0 PROJECT_BUILD_PATH [LINARO_USERNAME]"
+  echo "USAGE:$0 PROJECT_BUILD_PATH [LINARO_USERNAME]"
 	echo "Build FVP Environment to Run OPTEE and ATF"
 	echo ""
 	echo "Options usage:"
@@ -30,6 +30,8 @@ if [ $# -eq 2 ]; then
 	HAVE_ACCESS_TO_TEETEST=1
 fi
 
+NPROCESSORS=`getconf _NPROCESSORS_ONLN`
+
 ################################################################################
 # Don't touch anything below this comment                                      #
 ################################################################################
@@ -39,7 +41,8 @@ mkdir -p $DEV_PATH
 #"  http://www.arm.com/products/tools/models/fast-models/foundation-model.php"
 #When done, install it on this path:"
 #"  $DST_FVP"
-SRC_FVP=https://github.com/xlyu/Foundation_v8pkg.git
+#Because of the fvp right's license, I can't retribution fvp tools to public
+SRC_FVP=https://pangdeyu@bitbucket.org/neldtv/foundation_v8pkg.git
 DST_FVP=$DEV_PATH/Foundation_v8pkg
 
 SRC_ATF=https://github.com/ARM-software/arm-trusted-firmware.git
@@ -87,6 +90,7 @@ AARCH32_GCC=aarch32
 AARCH32_GCC_VERSION=gcc-linaro-arm-linux-gnueabihf-4.9-2014.08_linux
 SRC_AARCH32_GCC=http://releases.linaro.org/14.08/components/toolchain/binaries/${AARCH32_GCC_VERSION}.tar.xz
 DST_AARCH32_GCC=$DEV_PATH/toolchains/$AARCH32_GCC
+
 
 ################################################################################
 # Cloning all needed repositories                                              #
@@ -153,7 +157,6 @@ fi
 cd $DEV_PATH
 if [ ! -d "$DST_EDK2" ]; then
 	git clone -n $SRC_EDK2 && cd $DST_EDK2 && git reset --hard $STABLE_EDK2_COMMIT
-	cd DST_EDK2
 	git remote add -f --tags arm-software https://github.com/ARM-software/edk2.git
 	git checkout --detach v1.2
 else
@@ -195,6 +198,8 @@ fi
 #make sure have installed  uuid-dev
 #For Ubuntu 14.04 the following helps:
 #sudo apt-get install uuid-dev
+#For CentOS,will be:
+#yum  install libuuid-devel
 # If the downloaded toolchain can't execute it could be that you're in a
 # 64-bit system without required 32-bit libs
 # For Ubuntu 14.04 the following helps:
@@ -208,13 +213,14 @@ cat > $DEV_PATH/build_linux.sh << EOF
 #/bin/bash
 export PATH=$DST_AARCH64_NONE_GCC/bin:\$PATH
 export CROSS_COMPILE=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
-cd $DST_KERNEL
+MAKE_MACRO="-j$NPROCESSORS LOCALVERSION= ARCH=arm64"
 
-make ARCH=arm64 defconfig
-if [ $1x = "clean"x ]; then
-    make LOCALVERSION= ARCH=arm64 clean
+cd $DST_KERNEL
+make \$MAKE_MACRO defconfig
+if [ \$1x = "clean"x ]; then
+    make \$MAKE_MACRO clean
 else
-    make -j\`getconf _NPROCESSORS_ONLN\` LOCALVERSION= ARCH=arm64 \$@ ||exit "$$?"
+    make \$MAKE_MACRO \$@ ||exit \$?
 fi
 EOF
 
@@ -235,7 +241,7 @@ export CROSS_COMPILE=$DEV_PATH/toolchains/aarch64/bin/aarch64-linux-gnu-
 # Set path to gen_init_cpio
 export PATH=$DST_KERNEL/usr:$PATH
 #fresh rootfs while rebuilt
-./generate-cpio-rootfs.sh fvp-aarch64 ||exit "$$?"
+./generate-cpio-rootfs.sh fvp-aarch64 ||exit \$?
 
 cp $DST_GEN_ROOTFS/filelist-final.txt $DST_GEN_ROOTFS/filelist-tee.txt
 
@@ -278,7 +284,8 @@ file /bin/tee_ut_helloworld3 $DEV_PATH/out/utest/host/tee_ut_helloworld3/bin/tee
 file /bin/xtest $DEV_PATH/out/utest/host/xtest/bin/xtest 755 0 0
 EOF
 fi
-
+unset $CC_DIR
+unset $CROSS_COMPILE
 ################################################################################
 # Generate build_optee_os.sh for building optee_os                             #
 ################################################################################
@@ -292,12 +299,13 @@ export PLATFORM_FLAVOR=fvp
 export O=./out-os-fvp
 export CFG_TEE_CORE_LOG_LEVEL=5
 #export DEBUG=1
+MAKE_MACRO="-j$NPROCESSORS "
 
 cd $DST_OPTEE_OS
-if [ $1x = "clean"x ]; then
-    make clean
+if [ \$1x = "clean"x ]; then
+    make \$MAKE_MACRO clean
 else
-	  make -j\`getconf _NPROCESSORS_ONLN\` \$@ ||exit "$$?"
+	  make \$MAKE_MACRO \$@ ||exit \$?
 fi
 EOF
 
@@ -313,25 +321,26 @@ $DEV_PATH/build_optee_os.sh
 cd $DST_EDK2
 . edksetup.sh
 
-# Build the EDK host tools
-make -C BaseTools clean
-make -C BaseTools
-make -C BaseTools/Source/C clean
-make -C BaseTools/Source/C
 cd $DEV_PATH
 cat > $DEV_PATH/build_uefi.sh << EOF
 #/bin/bash
 export GCC49_AARCH64_PREFIX=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
-
+MAKE_MACRO="EDK2_ARCH=AARCH64 EDK2_DSC=ArmPlatformPkg/ArmVExpressPkg/ArmVExpress-FVP-AArch64.dsc EDK2_TOOLCHAIN=GCC49 EDK2_BUILD=RELEASE"
 cd $DST_EDK2
 . edksetup.sh
-make -f ArmPlatformPkg/Scripts/Makefile EDK2_ARCH=AARCH64 \\
-	EDK2_DSC=ArmPlatformPkg/ArmVExpressPkg/ArmVExpress-FVP-AArch64.dsc \\
-	EDK2_TOOLCHAIN=GCC49 EDK2_BUILD=RELEASE \\
-	EDK2_MACROS="-n 6 -D ARM_FOUNDATION_FVP=1" \$@||exit "$$?"
+if [ \$1x = "clean"x ]; then
+	make -C BaseTools clean
+	make -C BaseTools/Source/C clean
+	make -f ArmPlatformPkg/Scripts/Makefile \$MAKE_MACRO EDK2_MACROS="-n 6 -D ARM_FOUNDATION_FVP=1" \$@ clean
+else
+	make -C BaseTools ||exit $?
+	make -C BaseTools/Source/C ||exit $?
+	make -f ArmPlatformPkg/Scripts/Makefile \$MAKE_MACRO EDK2_MACROS="-n 6 -D ARM_FOUNDATION_FVP=1" \$@||exit \$?
+fi
 EOF
 
 chmod 711 $DEV_PATH/build_uefi.sh
+$DEV_PATH/build_uefi.sh clean
 $DEV_PATH/build_uefi.sh
 
 ################################################################################
@@ -347,19 +356,15 @@ export CFLAGS='-O0 -gdwarf-2'
 export DEBUG=1
 export BL32=$DST_OPTEE_OS/out-os-fvp/core/tee.bin
 export BL33=$DST_EDK2/Build/ArmVExpress-FVP-AArch64/RELEASE_GCC49/FV/FVP_AARCH64_EFI.fd
+MAKE_MACRO="-j$NPROCESSORS DEBUG=\$DEBUG FVP_TSP_RAM_LOCATION=tdram FVP_SHARED_DATA_LOCATION=tdram PLAT=fvp SPD=opteed"
+
 cd $DST_ATF/tools/fip_create
-make||exit "$$?"
+make||exit \$?
 cd $DST_ATF
-if [ $1x = "clean"x ]; then
-	make DEBUG=$DEBUG FVP_TSP_RAM_LOCATION=tdram FVP_SHARED_DATA_LOCATION=tdram PLAT=fvp SPD=opteed clean
+if [ \$1x = "clean"x ]; then
+	make \$MAKE_MACRO clean
 else
-	make -j\`getconf _NPROCESSORS_ONLN\`   \\
-		DEBUG=$DEBUG                   \\
-		FVP_TSP_RAM_LOCATION=tdram     \\
-		FVP_SHARED_DATA_LOCATION=tdram \\
-		PLAT=fvp                       \\
-		SPD=opteed                     \\
-		\$@ ||exit "$$?"
+	make \$MAKE_MACRO \$@ ||exit \$?
 fi
 EOF
 
@@ -375,12 +380,13 @@ cd $DEV_PATH
 cat > $DEV_PATH/build_optee_client.sh << EOF
 #!/bin/bash
 export PATH=$DST_AARCH64_GCC/bin:\$PATH
+MAKE_MACRO="-j$NPROCESSORS O=./out-client-aarch64 CROSS_COMPILE=aarch64-linux-gnu-"
 
 cd $DST_OPTEE_CLIENT
-if [ $1x = "clean"x ]; then
-	make O=./out-client-aarch64 CROSS_COMPILE=aarch64-linux-gnu- clean
+if [ \$1x = "clean"x ]; then
+	make \$MAKE_MACRO clean
 else
-	make -j\`getconf _NPROCESSORS_ONLN\` O=./out-client-aarch64 CROSS_COMPILE=aarch64-linux-gnu- \$@ ||exit "$$?"
+	make \$MAKE_MACRO \$@ ||exit \$?
 fi
 EOF
 
@@ -388,35 +394,26 @@ chmod 711 $DEV_PATH/build_optee_client.sh
 $DEV_PATH/build_optee_client.sh clean
 $DEV_PATH/build_optee_client.sh
 
-if [ -n "$HAVE_ACCESS_TO_TEETEST" ]; then
+
 ################################################################################
 # Generate build_optee_tests.sh                                                #
 ################################################################################
+if [ -n "$HAVE_ACCESS_TO_TEETEST" ]; then
 cd $DEV_PATH
 
 cat > $DEV_PATH/build_optee_tests.sh << EOF
 #!/bin/bash
 export PATH=$DST_AARCH64_GCC/bin:\$PATH
 export PATH=$DST_AARCH32_GCC/bin:\$PATH
-
 TA_DEV_KIT_DIR=$DST_OPTEE_OS/out-os-fvp/export-user_ta
 PUBLIC_DIR=$DST_OPTEE_CLIENT/out-client-aarch64/export
+MAKE_MACRO="O=./out-client-aarch64 PUBLIC_DIR=\$PUBLIC_DIR TA_DEV_KIT_DIR=\$TA_DEV_KIT_DIR HOST_CROSS_COMPILE=aarch64-linux-gnu- TA_CROSS_COMPILE=arm-linux-gnueabihf-"
 
 cd $DST_TEETEST
-if [ $1x = "clean"x ]; then
-	make O=./out-client-aarch64 \\
-								PUBLIC_DIR=\$PUBLIC_DIR \\
-								TA_DEV_KIT_DIR=\$TA_DEV_KIT_DIR \\
-                HOST_CROSS_COMPILE=aarch64-linux-gnu- \\
-                TA_CROSS_COMPILE=arm-linux-gnueabihf- \\
-                clean
+if [ \$1x = "clean"x ]; then
+	make \$MAKE_MACRO clean
 else
-	make O=./out-client-aarch64 \\
-                PUBLIC_DIR=\$PUBLIC_DIR \\
-                TA_DEV_KIT_DIR=\$TA_DEV_KIT_DIR \\
-                HOST_CROSS_COMPILE=aarch64-linux-gnu- \\
-                TA_CROSS_COMPILE=arm-linux-gnueabihf- \\
-                \$@ ||exit "$$?"
+	make \$MAKE_MACRO \$@ ||exit \$?
 fi
 EOF
 
@@ -433,12 +430,13 @@ cd $DEV_PATH
 cat > $DEV_PATH/build_optee_linuxkernel.sh << EOF
 #!/bin/bash
 export PATH=$DST_AARCH64_GCC/bin:\$PATH
+MAKE_MACRO="V=0 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M=$DST_OPTEE_LK"
 
 cd $DST_KERNEL
-if [ $1x = "clean"x ]; then
-	make V=0 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M=$DST_OPTEE_LK modules clean
+if [ \$1x = "clean"x ]; then
+	make \$MAKE_MACRO modules clean
 else
-	make V=0 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M=$DST_OPTEE_LK modules \$@ ||exit "$$?"
+	make \$MAKE_MACRO modules \$@ ||exit \$?
 fi
 EOF
 chmod 711 $DEV_PATH/build_optee_linuxkernel.sh
@@ -546,79 +544,26 @@ cd $DEV_PATH
 cat > $DEV_PATH/clean_fvp.sh << EOF
 #!/bin/bash
 DEV_PATH=$DEV_PATH
-DST_KERNEL=$DEV_PATH/linux
-AARCH64_NONE_GCC=aarch64-none-elf
-DST_AARCH64_NONE_GCC=$DEV_PATH/toolchains/$AARCH64_NONE_GCC
 DST_GEN_ROOTFS=$DEV_PATH/gen_rootfs
-AARCH64_GCC=aarch64
-DST_AARCH64_GCC=$DEV_PATH/toolchains/$AARCH64_GCC
-KERNEL_VERSION=`cd $DST_KERNEL && make kernelversion`
-DST_OPTEE_CLIENT=$DEV_PATH/optee_client
-DST_EDK2=$DEV_PATH/edk2
-DST_ATF=$DEV_PATH/arm-trusted-firmware
-DST_OPTEE_OS=$DEV_PATH/optee_os
-DST_OPTEE_LK=$DEV_PATH/optee_linuxdriver
-#clean linuxkernel
-export PATH=$DST_AARCH64_NONE_GCC/bin:$PATH
-export CROSS_COMPILE=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
-cd  $DST_KERNEL
-if [ ! -f ".config" ]; then
-        make ARCH=arm64 defconfig
-fi
 
-make  LOCALVERSION= ARCH=arm64 clean
-
-#########clean op_tee os
-export PATH=$DST_AARCH32_GCC/bin:$PATH
-export CROSS_COMPILE=arm-linux-gnueabihf-
-export PLATFORM=vexpress
-export PLATFORM_FLAVOR=fvp
-export O=./out-os-fvp
-export CFG_TEE_CORE_LOG_LEVEL=5
-#export DEBUG=1
-
-cd $DST_OPTEE_OS
-make  clean
-
-#####clean EDK
-export GCC49_AARCH64_PREFIX=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
-
-cd $DST_EDK2
-export WORKSPACE=$DST_EDK2
-. edksetup.sh
-make -C BaseTools/Source/C clean 
-
+######clean linuxkernel
+$DEV_PATH/build_linux.sh clean
+######clean op_tee os
+$DEV_PATH/build_optee_os.sh clean
+######clean EDK
+$DEV_PATH/build_uefi.sh clean
 ######clean atf
-export PATH=$DST_AARCH64_NONE_GCC/bin:$PATH
-export CROSS_COMPILE=$DST_AARCH64_NONE_GCC/bin/aarch64-none-elf-
-export CFLAGS='-O0 -gdwarf-2'
-export DEBUG=1
-export BL32=$DST_OPTEE_OS/out-os-fvp/core/tee.bin
-export BL33=$DST_EDK2/Build/ArmVExpress-FVP-AArch64/RELEASE_GCC49/FV/FVP_AARCH64_EFI.fd
-
-cd $DST_ATF
-make DEBUG= FVP_TSP_RAM_LOCATION=tdram FVP_SHARED_DATA_LOCATION=tdram PLAT=fvp SPD=opteed  clean
+$DEV_PATH/build_atf_opteed.sh clean
 ######clean op_tee client 
-export PATH=$DST_AARCH64_GCC/bin:$PATH
-
-cd $DST_OPTEE_CLIENT
-make  O=./out-client-aarch64 CROSS_COMPILE=aarch64-linux-gnu-  clean
-
+$DEV_PATH/build_optee_client.sh clean
 ######clean optee linux driver
-export PATH=$DST_AARCH64_GCC/bin:$PATH
-
-cd $DST_KERNEL
-make V=0 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= M=$DST_OPTEE_LK modules clean
-cd $DEV_PATH
-
+$DEV_PATH/build_optee_linuxkernel.sh clean
 ######clean rootfs
 cd $DST_GEN_ROOTFS
 find -name "*.o"|xargs rm -f
 find -name "*.so"|xargs rm -f
 find -name "*.a"|xargs rm -f
-cd $DEV_PATH
 EOF
-
 chmod 711 $DEV_PATH/clean_fvp.sh
 
 ################################################################################
